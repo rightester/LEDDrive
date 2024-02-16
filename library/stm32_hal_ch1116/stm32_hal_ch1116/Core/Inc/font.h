@@ -1,17 +1,18 @@
 #ifndef __FONT_H
 #define __FONT_H
-#include "stdint.h"
-#include "string.h"
+
+#include <stdint.h>
+
 typedef struct ASCIIFont {
   uint8_t w;
   uint8_t h;
   uint8_t *chars;
 } ASCIIFont;
 
-extern const ASCIIFont afont8x6;
-extern const ASCIIFont afont12x6;
-extern const ASCIIFont afont16x8;
-extern const ASCIIFont afont24x12;
+extern const ASCIIFont afont6x8;
+extern const ASCIIFont afont6x12;
+extern const ASCIIFont afont8x16;
+extern const ASCIIFont afont12x24;
 
 /**
  * @brief 字体结构体
