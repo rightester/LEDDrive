@@ -25,6 +25,7 @@
 #include "i2c.h"
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 // OLED器件地址
 #define OLED_ADDRESS 0x7A
