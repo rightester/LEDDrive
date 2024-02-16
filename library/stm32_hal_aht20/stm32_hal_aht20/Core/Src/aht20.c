@@ -1,99 +1,154 @@
-/**
- * @file aht20.c
- * @brief 波特律动AHT20(DHT20)驱动
- * @anchor 波特律动(keysking 博哥在学习)
- * @version 1.0
- * @date 2023-08-21
- * @license MIT License
+/*
+ * aht20.c
  *
- * @attention
- * 本驱动库基于波特律动·keysking的STM32教程学习套件进行开发
- * 在其他硬件平台上使用可能需要进行简单地移植: 修改Send与Reveive函数
- *
- * @note
- * 使用流程:
- * 1. STM32初始化IIC完成后调用AHT20_Init()初始化AHT20.
- * 2. 调用AHT20_Measure()可以进行一次测量
- * 3. 调用AHT20_Tempurature()与AHT20_Humidity()分别可以获取上次测量时的温度与湿度数据
+ *  Created on: Jan 31, 2024
+ *      Author: 叫我最右君
  */
+
+
 #include "aht20.h"
-#include "i2c.h"
+#include "usart.h"
+// #include "tim.h"
+#include <stdio.h>
+#include <string.h>
 
-// AHT20 IIC器件地址
-#define AHT20_ADDRESS 0x70
 
-// 温湿度数据暂存变量
-float Temperature;
-float Humidity;
+uint8_t readBuffer[8] = {0};
+AHT20_HandleTypeDef haht20 = {
+	.temp = 0.0,
+	.humi = 0.0,
+	.state = AHT20_UNINITIALIZED,
+	.addr = AHT20_ADDRESS,
+	.hi2c_p = &hi2c1,
+};
 
-// ========================== 底层通信函数 ==========================
 
-/**
- * @brief 向AHT20发送数据的函数
- * @param data 发送的数据
- * @param len 发送的数据长度
- * @return void
- * @note 此函数是移植本驱动时的重要函数 将本驱动库移植到其他平台时应根据实际情况修改此函数
- */
-void AHT20_Send(uint8_t *data, uint8_t len) {
-  HAL_I2C_Master_Transmit(&hi2c1, AHT20_ADDRESS, data, len, HAL_MAX_DELAY);
+void AHT20_Init(AHT20_HandleTypeDef *haht20_p) {
+	uint8_t readBuffer[1];
+	HAL_Delay(40);
+	HAL_I2C_Master_Receive(haht20_p->hi2c_p, AHT20_ADDRESS, readBuffer, 1, HAL_MAX_DELAY);
+	if (!(readBuffer[0] & 1<<3)) {
+		uint8_t sendBuffer[3] = {0xBE, 0x08, 0x00};
+		HAL_I2C_Master_Transmit(haht20_p->hi2c_p, AHT20_ADDRESS, sendBuffer, 3, HAL_MAX_DELAY);
+	}
+	haht20_p->state = AHT20_READY;
 }
 
-/**
- * @brief 从AHT20接收数据的函数
- * @param data 接收数据的缓冲区
- * @param len 接收数据的长度
- * @return void
- * @note 此函数是移植本驱动时的重要函数 将本驱动库移植到其他平台时应根据实际情况修改此函数
- */
-void AHT20_Receive(uint8_t *data, uint8_t len) {
-  HAL_I2C_Master_Receive(&hi2c1, AHT20_ADDRESS, data, len, HAL_MAX_DELAY);
+
+void AHT20_Measure(AHT20_HandleTypeDef *haht20_p) {
+	static uint8_t sendBuffer[3] = {0xAC, 0x33, 0x00};
+	HAL_I2C_Master_Transmit_DMA(haht20_p->hi2c_p, AHT20_ADDRESS, sendBuffer, 3);
 }
 
-/**
- * @brief AHT20初始化函数
- */
-void AHT20_Init() {
-  uint8_t readBuffer;
-  HAL_Delay(40);
-  AHT20_Receive(&readBuffer, 1);
-  if ((readBuffer & 0x08) == 0x00) {
-    uint8_t sendBuffer[3] = {0xBE, 0x08, 0x00};
-    AHT20_Send(sendBuffer, 3);
-  }
+
+void AHT20_Receive(AHT20_HandleTypeDef *haht20_p) {
+	for (int i=0; ; ) {
+		HAL_I2C_Master_Receive_DMA(haht20_p->hi2c_p, AHT20_ADDRESS, readBuffer, 6);
+		if ( (readBuffer[0] & 1<<7) == 0x00 ) {
+			return;
+		}
+		i++;
+		if (i>3) {
+			break;
+		}
+		HAL_Delay(75);
+	}
 }
 
-/**
- * @brief AHT20测量函数
- * @note 测量完成后可以通过AHT20_Tempurature()与AHT20_Humidity()获取温度与湿度数据
- */
-void AHT20_Measure() {
-  uint8_t sendBuffer[3] = {0xAC, 0x33, 0x00};
-  uint8_t readBuffer[6];
-  AHT20_Send(sendBuffer, 3);
-  HAL_Delay(75);
-  AHT20_Receive(readBuffer, 6);
 
-  if ((readBuffer[0] & 0x80) == 0x00) {
-    uint32_t data = 0;
-    data = ((uint32_t)readBuffer[3] >> 4) + ((uint32_t)readBuffer[2] << 4) + ((uint32_t)readBuffer[1] << 12);
-    Humidity = data * 100.0f / (1 << 20);
-
-    data = (((uint32_t)readBuffer[3] & 0x0F) << 16) + (((uint32_t)readBuffer[4]) << 8) + (uint32_t)readBuffer[5];
-    Temperature = data * 200.0f / (1 << 20) - 50;
-  }
+// uint32_t __REV(uint32_t) 可以硬件实现大小端序转换，以便进行数值运算，arm架构是小端序的，aht20传递过来的数值是大端序的
+// 20位的数据大于16位，只好用更大点的32位的类型uint32_t
+// 温度 取了readBuffer下标0至4共32位数据作为u32解引用(其中真正需要的*数据位*是[8..28]共20位数据)，__REV进行大小端序转换，
+//     这样得到的结果就可以进行期望的数学运算和位运算；
+//     然后位运算保留其中的[8..28]数据位，清0其他位，再整体右移4位，获得真正的期望的小端有效数值
+// 湿度 类同温度，需取得的数据位为readBuffer的下标2至6的字节共32位数其中的[12..32]共20位数据，运算后不需要移位
+// 得到转换后的数据就可以用之于后面的数学运算了
+// 如果没有 #include <cmsis_gcc.h> 那就按照#else中的数学运算的方式来算
+void AHT20_ConvertValue(AHT20_HandleTypeDef *haht20_p) {
+	float humi, temp = 0;
+	#ifdef __CMSIS_GCC_H
+	humi = (__REV(*(uint32_t*)readBuffer) & 0x00fffff0) >> 4;
+	temp = __REV(*(uint32_t*)(readBuffer+2)) & 0x000fffff;
+	#else
+	humi = ((uint32_t)readBuffer[3] >> 4) + ((uint32_t)readBuffer[2] << 4) + ((uint32_t)readBuffer[1] << 12);
+	temp = (((uint32_t)readBuffer[3] & 0x0F) << 16) + (((uint32_t)readBuffer[4]) << 8) + (uint32_t)readBuffer[5];
+	#endif
+	haht20_p->humi = humi / (1<<20) * 100;
+	haht20_p->temp = temp / (1<<20) * 200 - 50;
+	haht20_p->state = AHT20_CONVERTED;
 }
 
-/**
- * @brief 获取上次测量时的温度数据
- */
-float AHT20_Tempurature() {
-  return Temperature;
+
+__weak void AHT20_Process(AHT20_HandleTypeDef *haht20_p) {
+	switch(haht20_p->state) {
+	case AHT20_READY:
+		haht20_p->state = AHT20_MEASURING;
+		AHT20_Measure(haht20_p);
+		HAL_Delay(75);
+		break;
+	case AHT20_MEASURED:
+		haht20_p->state = AHT20_RECEIVING;
+		AHT20_Receive(haht20_p);
+		break;
+	case AHT20_RECEIVED:
+		haht20_p->state = AHT20_CONVERTING;
+		// HAL_TIM_Base_Init(&htim3);
+		// HAL_TIM_Base_Start(&htim3);
+		AHT20_ConvertValue(haht20_p);
+		// HAL_TIM_Base_Stop(&htim3);
+		// static char str[50];
+		// int counter = __HAL_TIM_GET_COUNTER(&htim3);
+		// sprintf(str, "Counter: %d\n", counter);
+		// HAL_UART_Transmit(&huart3, (uint8_t*)str, strlen(str), HAL_MAX_DELAY);
+		break;
+	case AHT20_CONVERTED:
+		ATH20_ConvertedCallback(haht20_p);
+		break;
+	case AHT20_FINISHED:
+		haht20_p->state = AHT20_READY;
+		break;
+	default:
+		break;
+	}
 }
 
-/**
- * @brief 获取上次测量时的湿度数据
- */
-float AHT20_Humidity() {
-  return Humidity;
+
+void AHT20_MeasuredCallback(AHT20_HandleTypeDef *haht20_p) {
+	switch(haht20_p->state) {
+	case AHT20_MEASURING:
+		haht20_p->state = AHT20_MEASURED;
+	default:
+		return;
+	}
+}/*
+void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef *hi2c) {
+	if (hi2c == haht20.hi2c_p) {
+		AHT20_MeasuredCallback(&haht20);
+	}
 }
+*/
+
+
+void AHT20_ReceivedCallback(AHT20_HandleTypeDef *haht20_p) {
+	switch (haht20_p->state) {
+	case AHT20_RECEIVING:
+		haht20_p->state = AHT20_RECEIVED;
+	default:
+		return;
+	}
+}/*
+void HAL_I2C_MasterRxCpltCallback(I2C_HandleTypeDef *hi2c) {
+	if (hi2c == haht20.hi2c_p) {
+		AHT20_ReceivedCallback(&haht20);
+	}
+}
+*/
+
+
+__weak void ATH20_ConvertedCallback(AHT20_HandleTypeDef *haht20_p) {
+	  static char str[50];
+	  sprintf(str, "温度：%.1f℃，湿度：%.0f%%\n", haht20_p->temp, haht20_p->humi);
+	  HAL_UART_Transmit(&huart3, (uint8_t*)str, strlen(str), HAL_MAX_DELAY);
+	  haht20_p->state = AHT20_FINISHED;
+}
+
