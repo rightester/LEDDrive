@@ -88,7 +88,8 @@ void OLED_Init() {
   OLED_SendCmd(0xAD); /*设置启动电荷泵 set charge pump enable*/
   OLED_SendCmd(0x8B); /*启动DC-DC */
 
-  OLED_SendCmd(0x33); /*设置泵电压 set VPP 10V */
+//  OLED_SendCmd(0x33); /*设置泵电压 set VPP 10V */
+  OLED_SendCmd(0x30); /*设置泵电压 set VPP 6.4V */
 
   OLED_SendCmd(0xC8); /*设置输出扫描方向 COM[N-1]到COM[0] Com scan direction*/
 
