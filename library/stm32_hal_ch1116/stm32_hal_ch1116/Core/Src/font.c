@@ -8,10 +8,11 @@
  * 中文字库请使用波特律动LED取模工具生成(https://led.baud-dance.com)
  * 图模也使用波特律动LED取模工具生成
  */
-// clang-format off
+
+
 #include "font.h"
 
-// 8*6 ASCII
+
 const unsigned char ascii_6x8[][6] = {
     {0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // space 空格
     {0x00, 0x00, 0x00, 0x2f, 0x00, 0x00}, // !
